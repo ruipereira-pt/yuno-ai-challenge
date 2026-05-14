@@ -42,6 +42,24 @@ func newTestRouterWithStreamEnabled() http.Handler {
 	return NewRouter(handler)
 }
 
+func newTestRouterWithStreamSecurity(token string, origins []string) http.Handler {
+	windowStore := store.NewWindowStore()
+	scorer := service.NewScorer()
+	alerts := service.NewAlertEvaluator(service.AlertConfig{
+		HealthThreshold:   60,
+		ApprovalThreshold: 0.70,
+		ErrorThreshold:    0.15,
+		SustainedFor:      5 * time.Minute,
+	}, scorer)
+	healthSvc := service.NewHealthService(windowStore, scorer, alerts, 180*time.Minute, 2*time.Minute)
+	handler := NewHandler(healthSvc).WithStreamConfig(StreamConfig{
+		Enabled:        true,
+		StreamToken:    token,
+		AllowedOrigins: origins,
+	})
+	return NewRouter(handler)
+}
+
 func TestEventsBatchContract(t *testing.T) {
 	router := newTestRouter()
 	now := time.Now().UTC()
@@ -323,6 +341,29 @@ func TestEventsStreamEnabledWebsocketHandshake(t *testing.T) {
 	}
 	if ack.AcceptedCount != 1 || ack.RejectedCount != 0 {
 		t.Fatalf("unexpected websocket ack: %+v", ack)
+	}
+}
+
+func TestEventsStreamRejectsInvalidToken(t *testing.T) {
+	router := newTestRouterWithStreamSecurity("secret-token", []string{"http://localhost"})
+	req := httptest.NewRequest(http.MethodGet, "/events/stream", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for missing stream token, got %d", rec.Code)
+	}
+}
+
+func TestEventsStreamRejectsDisallowedOrigin(t *testing.T) {
+	router := newTestRouterWithStreamSecurity("", []string{"http://localhost:3000"})
+	req := httptest.NewRequest(http.MethodGet, "/events/stream", nil)
+	req.Header.Set("Origin", "http://evil.example")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for disallowed origin, got %d", rec.Code)
 	}
 }
 

@@ -1,14 +1,15 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/ruipereira-pt/yuno-ai-challenge/internal/model"
 	"github.com/ruipereira-pt/yuno-ai-challenge/internal/service"
 )
@@ -19,12 +20,14 @@ type Handler struct {
 }
 
 type StreamConfig struct {
-	Enabled       bool
-	MaxFrameBytes int64
-	ReadTimeout   time.Duration
-	BatchSize     int
-	FlushInterval time.Duration
-	QueueSize     int
+	Enabled        bool
+	MaxFrameBytes  int64
+	ReadTimeout    time.Duration
+	BatchSize      int
+	FlushInterval  time.Duration
+	QueueSize      int
+	AllowedOrigins []string
+	StreamToken    string
 }
 
 func NewHandler(health *service.HealthService) *Handler {
@@ -37,6 +40,10 @@ func NewHandler(health *service.HealthService) *Handler {
 			BatchSize:     50,
 			FlushInterval: 1 * time.Second,
 			QueueSize:     1000,
+			AllowedOrigins: []string{
+				"http://localhost:3000",
+				"http://localhost:8080",
+			},
 		},
 	}
 }
@@ -57,8 +64,33 @@ func (h *Handler) WithStreamConfig(cfg StreamConfig) *Handler {
 	if cfg.QueueSize <= 0 {
 		cfg.QueueSize = h.stream.QueueSize
 	}
+	if len(cfg.AllowedOrigins) == 0 {
+		cfg.AllowedOrigins = h.stream.AllowedOrigins
+	}
 	h.stream = cfg
 	return h
+}
+
+func (h *Handler) isWSOriginAllowed(r *http.Request) bool {
+	origin := strings.TrimSpace(strings.ToLower(r.Header.Get("Origin")))
+	// Non-browser clients (e.g. CLI demos) usually do not send Origin.
+	if origin == "" {
+		return true
+	}
+	for _, allowed := range h.stream.AllowedOrigins {
+		if strings.ToLower(strings.TrimSpace(allowed)) == origin {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Handler) isWSTokenAllowed(r *http.Request) bool {
+	if h.stream.StreamToken == "" {
+		return true
+	}
+	token := r.Header.Get("X-Stream-Token")
+	return subtle.ConstantTimeCompare([]byte(token), []byte(h.stream.StreamToken)) == 1
 }
 
 func (h *Handler) PostEventsBatch(w http.ResponseWriter, r *http.Request) {
@@ -142,12 +174,16 @@ func (h *Handler) GetOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, errorPayload("method_not_allowed", "method not allowed", nil))
 		return
 	}
-	if _, err := os.Stat("docs/openapi.yaml"); err != nil {
-		writeJSON(w, http.StatusNotFound, errorPayload("not_found", "openapi spec file not found", map[string]string{"path": "docs/openapi.yaml"}))
-		return
+	specPath := "docs/openapi.yaml"
+	if _, err := os.Stat(specPath); err != nil {
+		if _, altErr := os.Stat("openapi.yaml"); altErr != nil {
+			writeJSON(w, http.StatusNotFound, errorPayload("not_found", "openapi spec file not found", map[string]string{"path": "docs/openapi.yaml|openapi.yaml"}))
+			return
+		}
+		specPath = "openapi.yaml"
 	}
 	w.Header().Set("Content-Type", "application/yaml")
-	http.ServeFile(w, r, "docs/openapi.yaml")
+	http.ServeFile(w, r, specPath)
 }
 
 func (h *Handler) GetDocs(w http.ResponseWriter, r *http.Request) {
@@ -177,10 +213,6 @@ func (h *Handler) GetDocs(w http.ResponseWriter, r *http.Request) {
     </script>
   </body>
 </html>`))
-}
-
-var wsUpgrader = websocket.Upgrader{
-	CheckOrigin: func(_ *http.Request) bool { return true },
 }
 
 const maxBatchBodyBytes int64 = 5 << 20 // 5MB

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ruipereira-pt/yuno-ai-challenge/internal/service"
@@ -17,12 +18,14 @@ type Config struct {
 }
 
 type WSConfig struct {
-	Enabled       bool
-	MaxFrameBytes int64
-	ReadTimeout   time.Duration
-	BatchSize     int
-	FlushInterval time.Duration
-	QueueSize     int
+	Enabled        bool
+	MaxFrameBytes  int64
+	ReadTimeout    time.Duration
+	BatchSize      int
+	FlushInterval  time.Duration
+	QueueSize      int
+	AllowedOrigins []string
+	StreamToken    string
 }
 
 func Load() Config {
@@ -37,12 +40,14 @@ func Load() Config {
 			SustainedFor:      getEnvDuration("ALERT_MIN_DURATION", 5*time.Minute),
 		},
 		WS: WSConfig{
-			Enabled:       getEnvBool("WS_INGEST_ENABLED", false),
-			MaxFrameBytes: int64(getEnvInt("WS_MAX_FRAME_BYTES", 1024*1024)),
-			ReadTimeout:   getEnvDuration("WS_READ_TIMEOUT", 30*time.Second),
-			BatchSize:     getEnvInt("WS_BATCH_SIZE", 50),
-			FlushInterval: getEnvDuration("WS_FLUSH_INTERVAL", 1*time.Second),
-			QueueSize:     getEnvInt("WS_QUEUE_SIZE", 1000),
+			Enabled:        getEnvBool("WS_INGEST_ENABLED", false),
+			MaxFrameBytes:  int64(getEnvInt("WS_MAX_FRAME_BYTES", 1024*1024)),
+			ReadTimeout:    getEnvDuration("WS_READ_TIMEOUT", 30*time.Second),
+			BatchSize:      getEnvInt("WS_BATCH_SIZE", 50),
+			FlushInterval:  getEnvDuration("WS_FLUSH_INTERVAL", 1*time.Second),
+			QueueSize:      getEnvInt("WS_QUEUE_SIZE", 1000),
+			AllowedOrigins: getEnvCSV("WS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080"),
+			StreamToken:    getEnv("WS_STREAM_TOKEN", ""),
 		},
 	}
 }
@@ -101,4 +106,20 @@ func getEnvBool(key string, fallback bool) bool {
 		return fallback
 	}
 	return parsed
+}
+
+func getEnvCSV(key string, fallback string) []string {
+	raw := getEnv(key, fallback)
+	if strings.TrimSpace(raw) == "" {
+		return []string{}
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }

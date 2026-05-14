@@ -75,6 +75,8 @@ Default backend address: `:8080`
 - `WS_BATCH_SIZE` (default `50`)
 - `WS_FLUSH_INTERVAL` (default `1s`)
 - `WS_QUEUE_SIZE` (default `1000`)
+- `WS_ALLOWED_ORIGINS` (default `http://localhost:3000,http://localhost:8080`)
+- `WS_STREAM_TOKEN` (default empty; when set, required in `X-Stream-Token`)
 
 Runtime config is env-driven.  
 `configs/local.yaml` is illustrative and not loaded at runtime.
@@ -211,6 +213,7 @@ Properties:
 - ~3-hour timeline
 - 3 PSPs: `PSP_ALPHA`, `PSP_BETA`, `PSP_GAMMA`
 - includes a degradation/recovery scenario
+- byte-stable by default (fixed base time in generator)
 
 ---
 
@@ -284,6 +287,11 @@ WebSocket endpoint:
 
 - `ws://localhost:8080/events/stream`
 
+Optional hardening controls:
+
+- `WS_ALLOWED_ORIGINS` controls accepted browser origins.
+- `WS_STREAM_TOKEN` enables token protection (required header: `X-Stream-Token`).
+
 Payload formats accepted:
 
 1) single event:
@@ -337,6 +345,7 @@ Optional flags:
 go run ./cmd/ws-demo -psp PSP_BETA -status error -response-ms 1800
 go run ./cmd/ws-demo -batch
 go run ./cmd/ws-demo -scenario degraded -psp PSP_GAMMA
+go run ./cmd/ws-demo -token my-secret-token
 ```
 
 One-command end-to-end recording flow:
@@ -373,12 +382,63 @@ curl -i http://localhost:8080/events/stream
 
 - If you see `stream ingest endpoint is disabled`, restart the server with `WS_INGEST_ENABLED=true`.
 
+If WS stream is protected and returns `401`:
+
+```bash
+WS_STREAM_TOKEN=secret make run
+go run ./cmd/ws-demo -url ws://localhost:8080/events/stream
+# add header support in your WS client:
+# X-Stream-Token: secret
+```
+
+---
+
+## Final Pre-Submit Verification
+
+Run this from a clean checkout:
+
+```bash
+make verify
+make generate-data
+```
+
+Then validate endpoint behavior:
+
+```bash
+# start server
+make run
+
+# new terminal
+curl -sS -X POST "http://localhost:8080/events/batch" \
+  -H "Content-Type: application/json" \
+  --data-binary @testdata/transactions.json
+curl -sS "http://localhost:8080/health"
+curl -sS "http://localhost:8080/alerts?active_only=true"
+curl -sS "http://localhost:8080/comparison"
+curl -sS "http://localhost:8080/openapi.yaml" > /dev/null
+```
+
+Final checks:
+
+- [ ] `make verify` passes (`gofmt`, tests, race checks).
+- [ ] `make generate-data` produces `testdata/transactions.json` with 800 events.
+- [ ] `/docs` and `/openapi.yaml` are reachable.
+- [ ] `/events/stream` is disabled by default and works when `WS_INGEST_ENABLED=true`.
+- [ ] README env defaults match runtime defaults (`MAX_EVENT_AGE=180m`, `MAX_FUTURE_SKEW=2m`, alert defaults).
+- [ ] Alert rule is sustained 5 continuous degraded minute-samples.
+- [ ] No-data behavior matches documented two-case contract.
+- [ ] Comparison sorting matches documented deterministic tie-breakers.
+- [ ] Ingest body limit is enforced at 5MB (`413 payload_too_large`).
+- [ ] Error envelope is consistent across validation paths.
+
+Use `./scripts/demo-final.sh` for a one-command recording flow after checks pass.
+
 ---
 
 ## Assumptions and Trade-offs
 
 - In-memory state is the source of truth for challenge scope.
-- Dedupe lifetime is process lifetime.
+- Dedupe retention is bounded to retained event horizon (`MAX_EVENT_AGE`).
 - Alert recomputation is ingest-driven and version-guarded for consistency.
 - Design prioritizes determinism, clarity, and reviewer reproducibility over persistence/scalability.
 

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/ruipereira-pt/yuno-ai-challenge/internal/model"
 )
 
@@ -19,8 +20,20 @@ func (h *Handler) GetEventsStream(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, errorPayload("not_found", "stream ingest endpoint is disabled", nil))
 		return
 	}
+	if !h.isWSOriginAllowed(r) {
+		writeJSON(w, http.StatusForbidden, errorPayload("forbidden", "origin is not allowed for stream ingest", nil))
+		return
+	}
+	if !h.isWSTokenAllowed(r) {
+		writeJSON(w, http.StatusUnauthorized, errorPayload("unauthorized", "invalid stream token", nil))
+		return
+	}
 
-	conn, err := wsUpgrader.Upgrade(w, r, nil)
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}

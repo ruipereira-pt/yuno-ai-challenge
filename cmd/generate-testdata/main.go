@@ -13,17 +13,21 @@ import (
 
 func main() {
 	var (
-		outPath = flag.String("out", "testdata/transactions.json", "output file path")
-		count   = flag.Int("count", 800, "number of events to generate")
+		outPath  = flag.String("out", "testdata/transactions.json", "output file path")
+		count    = flag.Int("count", 800, "number of events to generate")
+		baseTime = flag.String("base-time", "2026-05-14T12:00:00Z", "base time in RFC3339 for deterministic generation")
 	)
 	flag.Parse()
 
 	gen := testdata.NewGenerator()
-	now := time.Now().UTC()
-	events := gen.GenerateTransactions(now, *count)
+	parsedBase, err := time.Parse(time.RFC3339, *baseTime)
+	if err != nil {
+		log.Fatalf("invalid -base-time (must be RFC3339): %v", err)
+	}
+	events := gen.GenerateTransactions(parsedBase.UTC(), *count)
 	payload := model.BatchIngestRequest{Events: events}
 
-	if err := os.MkdirAll("testdata", 0o755); err != nil {
+	if err := os.MkdirAll("testdata", 0o750); err != nil {
 		log.Fatalf("create output dir: %v", err)
 	}
 	file, err := os.Create(*outPath)

@@ -21,12 +21,14 @@ func main() {
 	healthSvc := service.NewHealthService(windowStore, scorer, alerts, cfg.MaxEventAge, cfg.MaxFutureSkew)
 
 	handler := api.NewHandler(healthSvc).WithStreamConfig(api.StreamConfig{
-		Enabled:       cfg.WS.Enabled,
-		MaxFrameBytes: cfg.WS.MaxFrameBytes,
-		ReadTimeout:   cfg.WS.ReadTimeout,
-		BatchSize:     cfg.WS.BatchSize,
-		FlushInterval: cfg.WS.FlushInterval,
-		QueueSize:     cfg.WS.QueueSize,
+		Enabled:        cfg.WS.Enabled,
+		MaxFrameBytes:  cfg.WS.MaxFrameBytes,
+		ReadTimeout:    cfg.WS.ReadTimeout,
+		BatchSize:      cfg.WS.BatchSize,
+		FlushInterval:  cfg.WS.FlushInterval,
+		QueueSize:      cfg.WS.QueueSize,
+		AllowedOrigins: cfg.WS.AllowedOrigins,
+		StreamToken:    cfg.WS.StreamToken,
 	})
 	router := api.NewRouter(handler)
 

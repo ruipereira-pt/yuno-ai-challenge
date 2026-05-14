@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -50,13 +51,20 @@ func loggingMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(lrw, r)
 
+		// #nosec G706 -- user-controlled fields are sanitized via sanitizeLogField before logging.
 		log.Printf(
 			"http_request method=%s path=%s status=%d duration_ms=%d remote=%s",
-			r.Method,
-			r.URL.RequestURI(),
+			sanitizeLogField(r.Method),
+			sanitizeLogField(r.URL.RequestURI()),
 			lrw.status,
 			time.Since(start).Milliseconds(),
-			r.RemoteAddr,
+			sanitizeLogField(r.RemoteAddr),
 		)
 	})
+}
+
+func sanitizeLogField(v string) string {
+	cleaned := strings.ReplaceAll(v, "\n", "_")
+	cleaned = strings.ReplaceAll(cleaned, "\r", "_")
+	return cleaned
 }

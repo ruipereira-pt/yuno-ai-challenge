@@ -106,3 +106,34 @@ func TestAggregateWindowBoundariesForAllConfiguredWindows(t *testing.T) {
 		t.Fatalf("expected 60m total=2, got ok=%v total=%d", ok60, m60Agg.Total)
 	}
 }
+
+func TestPruneEventsBeforeAlsoBoundsDedupeIndex(t *testing.T) {
+	ws := NewWindowStore()
+	now := time.Now().UTC().Truncate(time.Minute)
+
+	oldEvent := model.TransactionEvent{
+		TransactionID:  "tx-replay",
+		PSP:            "PSP_ALPHA",
+		Status:         model.StatusApproved,
+		ResponseTimeMs: 150,
+		Timestamp:      now.Add(-2 * time.Hour),
+	}
+	accepted, duplicates := ws.IngestBatch([]model.TransactionEvent{oldEvent})
+	if accepted != 1 || duplicates != 0 {
+		t.Fatalf("unexpected initial ingest counts accepted=%d duplicates=%d", accepted, duplicates)
+	}
+
+	// Prune old event and ensure dedupe map follows retention.
+	ws.PruneEventsBefore(now.Add(-60 * time.Minute))
+
+	accepted, duplicates = ws.IngestBatch([]model.TransactionEvent{{
+		TransactionID:  "tx-replay",
+		PSP:            "PSP_ALPHA",
+		Status:         model.StatusApproved,
+		ResponseTimeMs: 120,
+		Timestamp:      now,
+	}})
+	if accepted != 1 || duplicates != 0 {
+		t.Fatalf("expected replay ID to be accepted after retention prune; got accepted=%d duplicates=%d", accepted, duplicates)
+	}
+}

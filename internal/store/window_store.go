@@ -16,7 +16,7 @@ type WindowStore struct {
 	mu              sync.RWMutex
 	byPSP           map[string]*PSPState
 	order           []string
-	seenEventIDs    map[string]struct{}
+	seenEventIDs    map[string]time.Time
 	alertsByPSP     map[string][]model.AlertIncident
 	activeByPSP     map[string]*model.AlertIncident
 	ingestVersion   uint64
@@ -27,7 +27,7 @@ func NewWindowStore() *WindowStore {
 	return &WindowStore{
 		byPSP:           make(map[string]*PSPState),
 		order:           make([]string, 0),
-		seenEventIDs:    make(map[string]struct{}),
+		seenEventIDs:    make(map[string]time.Time),
 		alertsByPSP:     make(map[string][]model.AlertIncident),
 		activeByPSP:     make(map[string]*model.AlertIncident),
 		alertVersionPSP: make(map[string]uint64),
@@ -50,7 +50,7 @@ func (s *WindowStore) IngestBatch(events []model.TransactionEvent) (accepted int
 			s.order = append(s.order, evt.PSP)
 		}
 		state.Events = append(state.Events, evt)
-		s.seenEventIDs[evt.TransactionID] = struct{}{}
+		s.seenEventIDs[evt.TransactionID] = evt.Timestamp.UTC()
 		accepted++
 	}
 
@@ -104,7 +104,7 @@ func (s *WindowStore) ClassifyAndIngest(
 		}
 		state.Events = append(state.Events, evt)
 		if evt.TransactionID != "" {
-			s.seenEventIDs[evt.TransactionID] = struct{}{}
+			s.seenEventIDs[evt.TransactionID] = evt.Timestamp.UTC()
 		}
 	}
 
@@ -128,6 +128,22 @@ func (s *WindowStore) PruneEventsBefore(cutoff time.Time) {
 		}
 		state.Events = next
 	}
+
+	// Keep dedupe bounded to retained event horizon.
+	// IDs older than current event retention are evicted.
+	retainedIDs := make(map[string]time.Time)
+	for _, state := range s.byPSP {
+		for _, evt := range state.Events {
+			if evt.TransactionID == "" {
+				continue
+			}
+			ts := evt.Timestamp.UTC()
+			if prev, ok := retainedIDs[evt.TransactionID]; !ok || ts.After(prev) {
+				retainedIDs[evt.TransactionID] = ts
+			}
+		}
+	}
+	s.seenEventIDs = retainedIDs
 }
 
 func (s *WindowStore) SnapshotBuckets(pspFilter string) map[string][]MinuteBucketView {

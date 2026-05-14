@@ -101,6 +101,8 @@ WebSocket endpoint for streaming ingestion with micro-batching into the same cor
 
 Feature flag:
 - `WS_INGEST_ENABLED=true` to enable.
+- Optional origin allowlist via `WS_ALLOWED_ORIGINS`.
+- Optional token protection via `WS_STREAM_TOKEN` (client sends `X-Stream-Token` header).
 
 Behavior:
 - Accepts either a single event JSON object or `{ "events": [...] }`.
@@ -116,6 +118,8 @@ Error behavior:
 - Invalid payload -> ack with `rejected_count=1`, `code=invalid_request`.
 - Queue overflow -> ack with `code=queue_full` for rejected events.
 - If endpoint is disabled -> HTTP `404 not_found`.
+- If token protection is enabled and token is invalid/missing -> HTTP `401 unauthorized`.
+- If request `Origin` is not allowlisted -> HTTP `403 forbidden`.
 
 ---
 

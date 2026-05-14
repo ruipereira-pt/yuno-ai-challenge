@@ -45,8 +45,10 @@ jobs:
 
       - name: Verify deterministic test-data generation
         run: |
-          go run ./cmd/generate-testdata -out /tmp/transactions.json -count 800
-          test -s /tmp/transactions.json
+          go run ./cmd/generate-testdata -out /tmp/transactions-a.json -count 800
+          go run ./cmd/generate-testdata -out /tmp/transactions-b.json -count 800
+          test -s /tmp/transactions-a.json
+          cmp -s /tmp/transactions-a.json /tmp/transactions-b.json
 
       - name: WebSocket smoke test
         run: |

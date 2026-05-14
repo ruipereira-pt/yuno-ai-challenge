@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 	"time"
 
@@ -21,6 +22,7 @@ func main() {
 		responseMs  = flag.Int("response-ms", 220, "response time in ms")
 		sendBatch   = flag.Bool("batch", false, "send as {\"events\":[...]} payload instead of single event")
 		scenario    = flag.String("scenario", "single", "demo scenario: single|degraded")
+		streamToken = flag.String("token", "", "optional stream token sent as X-Stream-Token header")
 		readTimeout = flag.Duration("timeout", 5*time.Second, "timeout waiting for ack")
 	)
 	flag.Parse()
@@ -30,7 +32,12 @@ func main() {
 		log.Fatalf("invalid -url: %v", err)
 	}
 
-	conn, _, err := websocket.DefaultDialer.Dial(parsedURL.String(), nil)
+	headers := http.Header{}
+	if *streamToken != "" {
+		headers.Set("X-Stream-Token", *streamToken)
+	}
+
+	conn, _, err := websocket.DefaultDialer.Dial(parsedURL.String(), headers)
 	if err != nil {
 		log.Fatalf("connect websocket: %v", err)
 	}

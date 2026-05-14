@@ -30,6 +30,7 @@ func (g *Generator) GenerateTransactions(base time.Time, count int) []model.Tran
 	}
 
 	events := make([]model.TransactionEvent, 0, count)
+	// #nosec G404 -- deterministic synthetic dataset generation; no cryptographic use.
 	rnd := rand.New(rand.NewSource(42))
 
 	// ~3h timeline by spreading events every 14 seconds.
