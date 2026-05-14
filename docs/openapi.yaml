@@ -1,0 +1,469 @@
+openapi: 3.0.3
+info:
+  title: PSP Health Monitoring Service API
+  version: 1.0.0
+  description: |
+    API contracts for ingesting PSP transaction events and querying rolling health,
+    degradation alerts, and PSP comparison rankings.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: Ingestion
+  - name: Streaming
+  - name: Health
+  - name: Alerts
+  - name: Comparison
+  - name: Status
+paths:
+  /status:
+    get:
+      tags: [Status]
+      summary: Process status probe
+      responses:
+        "200":
+          description: Service is running
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+              example:
+                status: ok
+        "405":
+          description: Method not allowed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /events/batch:
+    post:
+      tags: [Ingestion]
+      summary: Ingest a batch of transaction events
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchIngestRequest"
+      responses:
+        "200":
+          description: Batch accepted with dedupe/rejection accounting
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchIngestResponse"
+        "400":
+          description: Invalid JSON payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Request body exceeds configured limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Method not allowed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /events/stream:
+    get:
+      tags: [Streaming]
+      summary: Optional WebSocket streaming ingest endpoint
+      description: |
+        Optional stretch endpoint (disabled by default).
+        Upgrade this GET request to WebSocket and stream either single transaction events
+        or `BatchIngestRequest` payloads. The server micro-batches incoming events and emits
+        `BatchIngestResponse`-shaped acknowledgements over the socket.
+      responses:
+        "101":
+          description: WebSocket protocol upgrade completed
+        "404":
+          description: Stream ingest feature is disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Method not allowed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Get current health for all PSPs or one PSP
+      parameters:
+        - in: query
+          name: psp
+          required: false
+          schema:
+            type: string
+          description: Optional PSP identifier filter
+      responses:
+        "200":
+          description: Health snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "405":
+          description: Method not allowed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /psps:
+    get:
+      tags: [Health]
+      summary: Alias of /health
+      parameters:
+        - in: query
+          name: psp
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Health snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "405":
+          description: Method not allowed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /alerts:
+    get:
+      tags: [Alerts]
+      summary: Get degradation incidents
+      parameters:
+        - in: query
+          name: psp
+          required: false
+          schema:
+            type: string
+          description: Optional PSP filter
+        - in: query
+          name: from
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: RFC3339 UTC lower bound
+        - in: query
+          name: to
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: RFC3339 UTC upper bound
+        - in: query
+          name: active_only
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Strict boolean query flag (`true` or `false`); invalid values return 400
+      responses:
+        "200":
+          description: |
+            Alert incidents computed from minute-sampled rolling 5-minute windows.
+            Incidents open only after 5 continuous degraded minute-samples.
+            No-data minutes are treated as unknown and do not auto-open or auto-close incidents.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertsResponse"
+        "400":
+          description: Invalid range format or invalid `active_only` boolean value
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid range bounds (from >= to)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Method not allowed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /comparison:
+    get:
+      tags: [Comparison]
+      summary: Compare PSP performance and ranking over a range
+      parameters:
+        - in: query
+          name: from
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: RFC3339 UTC lower bound (must be provided together with `to`, or both omitted)
+        - in: query
+          name: to
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: RFC3339 UTC upper bound (must be provided together with `from`, or both omitted)
+      responses:
+        "200":
+          description: PSP ranking for the requested time range
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComparisonResponse"
+        "400":
+          description: Invalid range format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid range bounds (from >= to)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Method not allowed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    TransactionEvent:
+      type: object
+      required: [transaction_id, psp, status, response_time_ms, timestamp]
+      properties:
+        transaction_id:
+          type: string
+        psp:
+          type: string
+        status:
+          type: string
+          enum: [approved, declined, error]
+        response_time_ms:
+          type: integer
+          minimum: 0
+        timestamp:
+          type: string
+          format: date-time
+          description: Event time in RFC3339 UTC
+
+    BatchIngestRequest:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/TransactionEvent"
+
+    BatchIngestError:
+      type: object
+      required: [index, transaction_id, code, message]
+      properties:
+        index:
+          type: integer
+          minimum: 0
+        transaction_id:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+
+    BatchIngestResponse:
+      type: object
+      required: [accepted_count, duplicate_count, rejected_count, errors]
+      properties:
+        accepted_count:
+          type: integer
+          minimum: 0
+        duplicate_count:
+          type: integer
+          minimum: 0
+        rejected_count:
+          type: integer
+          minimum: 0
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/BatchIngestError"
+
+    WindowMetrics:
+      type: object
+      required:
+        [
+          total,
+          approved,
+          declined,
+          error,
+          approval_rate,
+          error_rate,
+          avg_response_time_ms
+        ]
+      properties:
+        total:
+          type: integer
+          minimum: 0
+        approved:
+          type: integer
+          minimum: 0
+        declined:
+          type: integer
+          minimum: 0
+        error:
+          type: integer
+          minimum: 0
+        approval_rate:
+          type: number
+          format: double
+        error_rate:
+          type: number
+          format: double
+        avg_response_time_ms:
+          type: number
+          format: double
+
+    PSPHealth:
+      type: object
+      required: [psp, no_data, degraded, windows]
+      properties:
+        psp:
+          type: string
+        health_score:
+          type: number
+          format: double
+          nullable: true
+          description: Null when no 5m aggregate exists (zero events in 5m window)
+        no_data:
+          type: boolean
+        degraded:
+          type: boolean
+        windows:
+          type: object
+          description: |
+            Window metrics keyed by duration (`5m`, `15m`, `60m`) when available.
+            Zero-event aggregates are treated as `ok=false` and omitted from this object.
+          additionalProperties:
+            $ref: "#/components/schemas/WindowMetrics"
+
+    HealthResponse:
+      type: object
+      required: [generated_at, psps]
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        psps:
+          type: array
+          items:
+            $ref: "#/components/schemas/PSPHealth"
+
+    AlertIncident:
+      type: object
+      required: [psp, started_at, reason]
+      properties:
+        psp:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        reason:
+          type: string
+          description: Opening reason for the incident
+
+    AlertsResponse:
+      type: object
+      required: [events]
+      properties:
+        psp:
+          type: string
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AlertIncident"
+
+    ComparisonRow:
+      type: object
+      required: [psp, health_score, approval_rate, avg_response_time_ms]
+      properties:
+        psp:
+          type: string
+        health_score:
+          type: number
+          format: double
+        approval_rate:
+          type: number
+          format: double
+        avg_response_time_ms:
+          type: number
+          format: double
+
+    ComparisonRange:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+
+    ComparisonResponse:
+      type: object
+      required: [range, ranking]
+      properties:
+        range:
+          $ref: "#/components/schemas/ComparisonRange"
+        ranking:
+          type: array
+          items:
+            $ref: "#/components/schemas/ComparisonRow"
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties:
+                type: string

@@ -1,0 +1,20 @@
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+
+# Local agent/editor artifacts
+.cursor/
+
+# Go
+bin/
+dist/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Logs/temp
+*.log
+tmp/
