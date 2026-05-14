@@ -1,0 +1,17 @@
+server:
+  http_addr: ":8080"
+
+windows:
+  - "5m"
+  - "15m"
+  - "60m"
+
+alerts:
+  health_threshold: 60
+  approval_lt: 0.70
+  error_gt: 0.15
+  min_duration: "5m"
+
+ingestion:
+  max_event_age: "180m"
+  max_future_skew: "2m"
